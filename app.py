@@ -6,7 +6,6 @@ import json
 import sys
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession, StdioServerParameters
@@ -48,12 +47,22 @@ with st.sidebar:
 # --- Setup ---
 @st.cache_resource
 def load_vectorstore():
+    from langchain_community.vectorstores import FAISS
+    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_core.documents import Document
+    
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    return Chroma(
-        persist_directory="./nav_knowledge_base",
-        embedding_function=embeddings,
-        collection_name="nav_incidents"
-    )
+    
+    documents = [
+        Document(page_content="Incident: FEED_PRICE_01 Down. Date: 2026-03-10. Fund: FUND001. Root Cause: Network timeout. Resolution: Restart ingestion service. Duration: 45 minutes.", metadata={"type": "incident"}),
+        Document(page_content="Incident: Corporate Action Missing. Date: 2026-02-22. Fund: FUND001. Resolution: Manual override. Duration: 120 minutes.", metadata={"type": "incident"}),
+        Document(page_content="Incident: NAV Timeout. Date: 2026-04-01. Fund: FUND003. Resolution: Reprocessed with higher timeout. Duration: 30 minutes.", metadata={"type": "incident"}),
+        Document(page_content="Playbook: FEED_PRICE_01 Recovery. Step 1: Check provider status. Step 2: Restart ingestion service. Step 3: Switch to backup feed. Resolution: 30-45 minutes.", metadata={"type": "playbook"}),
+        Document(page_content="Playbook: Corporate Action Recovery. Step 1: Check vendor portal. Step 2: Manual data pull. Step 3: Validate completeness. Resolution: 60-120 minutes.", metadata={"type": "playbook"}),
+        Document(page_content="Incident: SettlementEngine Failure. Date: 2026-02-10. Fund: FUND001. Cause: Late NAV from FEED_PRICE_01 outage. Resolution: Manual NAV publication. Duration: 120 minutes.", metadata={"type": "incident"}),
+    ]
+    
+    return FAISS.from_documents(documents, embeddings)
 
 vectorstore = load_vectorstore()
 llm = ChatOpenAI(model="gpt-4o", temperature=0)
