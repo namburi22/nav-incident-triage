@@ -1,0 +1,8 @@
+venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+nav_knowledge_base/
+.langchain/
+*.db
