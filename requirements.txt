@@ -1,1 +1,13 @@
-pip freeze > requirements.txt
+streamlit
+langchain
+langchain-openai
+langchain-chroma
+langchain-huggingface
+langchain-mcp-adapters
+langgraph
+mcp
+anthropic
+chromadb
+sentence-transformers
+python-dotenv
+openai
