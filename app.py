@@ -1,8 +1,9 @@
+import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import streamlit as st
 import asyncio
 import json
 import sys
-import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
@@ -13,7 +14,7 @@ from mcp.client.stdio import stdio_client
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List
 
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 
 load_dotenv()
 
