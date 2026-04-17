@@ -1,13 +1,13 @@
 streamlit
 langchain
 langchain-openai
-langchain-chroma
+langchain-chroma==0.1.4
 langchain-huggingface
 langchain-mcp-adapters
 langgraph
 mcp
 anthropic
-chromadb
+chromadb==0.5.23
 sentence-transformers
 python-dotenv
 openai
