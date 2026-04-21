@@ -274,3 +274,12 @@ Specialising in NAV lifecycle, fund accounting, high-volume distributed systems
 - [LangSmith](https://smith.langchain.com) — Observability
 - [Streamlit](https://streamlit.io) — UI framework
 - [OpenAI GPT-4o](https://openai.com) — Reasoning engine
+
+
+## Phase 2 — Production Patterns
+
+| File | Concept | Key Outcome |
+|---|---|---|
+| human_in_loop.py | Human approval gate | SRE pause + audit trail |
+| parallel_agents.py | Async parallel execution | 2.7x speedup measured |
+| evaluation_framework.py | Agent evaluation | 18/18 checks, LangSmith logged |
