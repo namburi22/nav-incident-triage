@@ -19,13 +19,6 @@ from typing import TypedDict, List, Optional
 
 load_dotenv()
 
-# --- Page config ---
-st.set_page_config(
-    page_title="NAV Incident Triage",
-    page_icon="🏦",
-    layout="wide"
-)
-
 # --- Cost Constants ---
 COSTS = {
     "gpt-4o":      {"input": 2.50,  "output": 10.00},
@@ -146,6 +139,13 @@ def get_all_memories() -> List[dict]:
             for m in memories
         ]
 
+# --- Page config ---
+st.set_page_config(
+    page_title="NAV Incident Triage",
+    page_icon="🏦",
+    layout="wide"
+)
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("Configuration")
@@ -162,7 +162,6 @@ with st.sidebar:
     st.success("LangSmith: Tracing")
     st.divider()
 
-    # Memory quick view in sidebar
     past = get_incident_memories(fund_id, limit=3)
     if past:
         st.markdown(f"**Last {len(past)} incidents for {fund_id}**")
@@ -247,8 +246,7 @@ def load_vectorstore():
 
 vectorstore = load_vectorstore()
 
-# Two LLMs — smart routing
-llm_powerful = ChatOpenAI(model="gpt-4o", temperature=0)
+llm_powerful  = ChatOpenAI(model="gpt-4o",      temperature=0)
 llm_efficient = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 # --- State ---
@@ -434,7 +432,6 @@ async def supervisor_agent(state, status_container):
     tracker = TokenTracker("Supervisor", "gpt-4o")
     llm_t = llm_powerful.with_config({"callbacks": [tracker]})
     try:
-        # Load memory context
         past = get_incident_memories(state["fund_id"], limit=3)
         memory_context = ""
         if past:
@@ -518,8 +515,28 @@ with col1:
     run_button = st.button("🚀 Run Triage", type="primary", use_container_width=True)
 
 with col2:
+    # Run triage and store in session state
     if run_button:
-        # Store result in session state so SRE tab can access it
+        # Clear previous SRE decision when running fresh triage
+        if "sre_decision" in st.session_state:
+            del st.session_state["sre_decision"]
+        if "sre_rationale" in st.session_state:
+            del st.session_state["sre_rationale"]
+
+        status_container = st.container()
+        with st.spinner("Running agentic investigation..."):
+            result = asyncio.run(run_triage(fund_id, status_container))
+
+        st.session_state["triage_result"] = result
+        st.session_state["triage_fund"] = fund_id
+
+    # Show tabs if we have a result
+    if "triage_result" in st.session_state:
+        result = st.session_state["triage_result"]
+        current_fund = st.session_state.get("triage_fund", fund_id)
+
+        st.caption(f"Showing results for: **{current_fund}**")
+
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "🔬 Investigation",
             "🚨 SRE Approval",
@@ -529,16 +546,7 @@ with col2:
         ])
 
         with tab1:
-            st.subheader("Live Investigation")
-            status_container = st.container()
-
-            with st.spinner("Running agentic investigation..."):
-                result = asyncio.run(run_triage(fund_id, status_container))
-
-            # Store in session state for other tabs
-            st.session_state["triage_result"] = result
-
-            st.divider()
+            st.subheader("Investigation Results")
 
             if result["steps"]:
                 st.subheader("Agent Results")
@@ -563,14 +571,9 @@ with col2:
         with tab2:
             st.subheader("🚨 SRE Team Approval Gate")
 
-            result = st.session_state.get("triage_result", {})
-
-            if not result:
-                st.info("Run triage first to see approval gate.")
-            elif result.get("severity") != "CRITICAL":
+            if result.get("severity") != "CRITICAL":
                 st.success(f"✅ Severity is {result.get('severity', 'STANDARD')} — no SRE approval needed.")
             else:
-                # Show incident summary for SRE
                 col_a, col_b, col_c = st.columns(3)
                 with col_a:
                     st.metric("Fund", result.get("fund_id"))
@@ -595,14 +598,18 @@ with col2:
                 decision = st.radio(
                     "Approve P1 escalation?",
                     ["Select...", "✅ APPROVE — Escalate to P1", "❌ REJECT — Monitor standard"],
-                    index=0
+                    index=0,
+                    key="sre_radio"
                 )
                 rationale = st.text_area(
                     "Rationale (required):",
-                    placeholder="e.g. FEED_PRICE_01 down 10 hours, SettlementEngine at risk..."
+                    placeholder="e.g. FEED_PRICE_01 down 10 hours, SettlementEngine at risk...",
+                    key="sre_rationale_input"
                 )
 
-                if st.button("Submit SRE Decision", type="primary"):
+                submit = st.button("Submit SRE Decision", type="primary", key="sre_submit")
+
+                if submit:
                     if decision == "Select...":
                         st.error("Please select a decision.")
                     elif not rationale.strip():
@@ -610,7 +617,6 @@ with col2:
                     else:
                         sre_decision = "APPROVE" if "APPROVE" in decision else "REJECT"
 
-                        # Save to memory
                         save_incident_memory({
                             "fund_id": result.get("fund_id"),
                             "nav_status": "FAILED",
@@ -623,64 +629,65 @@ with col2:
                             "sre_decision": sre_decision,
                         })
 
-                        if sre_decision == "APPROVE":
-                            st.error("🚨 P1 ESCALATED")
-                            st.markdown(f"**Decision:** {sre_decision}")
-                            st.markdown(f"**Rationale:** {rationale}")
-                            st.markdown("""
-                            **Immediate Actions:**
-                            - Page on-call SRE team
-                            - Open P1 incident ticket
-                            - Notify Fund Operations manager
-                            - Start 15-minute update cycle
-                            """)
-                        else:
-                            st.warning("📊 STANDARD MONITORING")
-                            st.markdown(f"**Decision:** {sre_decision}")
-                            st.markdown(f"**Rationale:** {rationale}")
-                            st.markdown("""
-                            **Monitoring Plan:**
-                            - Check feed status every 15 minutes
-                            - Escalate to P1 if not resolved in 60 minutes
-                            - Keep stakeholders informed via email
-                            """)
+                        st.session_state["sre_decision"] = sre_decision
+                        st.session_state["sre_rationale"] = rationale
 
-                        st.success("✅ Decision logged to memory database")
-                        st.info("🔄 Re-run triage to see this incident in Memory tab")
+                # Show outcome if decision was made — reads from session state
+                if "sre_decision" in st.session_state:
+                    sre_decision = st.session_state["sre_decision"]
+                    sre_rationale = st.session_state["sre_rationale"]
+
+                    st.divider()
+                    if sre_decision == "APPROVE":
+                        st.error("🚨 P1 ESCALATED")
+                        st.markdown(f"**Decision:** APPROVED")
+                        st.markdown(f"**Rationale:** {sre_rationale}")
+                        st.markdown("""
+                        **Immediate Actions:**
+                        - Page on-call SRE team
+                        - Open P1 incident ticket
+                        - Notify Fund Operations manager
+                        - Start 15-minute update cycle
+                        """)
+                    else:
+                        st.warning("📊 STANDARD MONITORING")
+                        st.markdown(f"**Decision:** REJECTED")
+                        st.markdown(f"**Rationale:** {sre_rationale}")
+                        st.markdown("""
+                        **Monitoring Plan:**
+                        - Check feed status every 15 minutes
+                        - Escalate to P1 if not resolved in 60 minutes
+                        - Keep stakeholders informed via email
+                        """)
+                    st.success("✅ Decision logged to memory database")
 
         with tab3:
             st.subheader("Executive Incident Summary")
-            result = st.session_state.get("triage_result", {})
-            if not result:
-                st.info("Run triage first.")
+            severity = result.get("severity", "")
+            if severity == "CRITICAL":
+                st.error(f"🔴 Severity: CRITICAL — {result.get('severity_reason', '')}")
+            elif severity == "STANDARD":
+                st.warning("🟡 Severity: STANDARD")
             else:
-                severity = result.get("severity", "")
-                if severity == "CRITICAL":
-                    st.error(f"🔴 Severity: CRITICAL — {result.get('severity_reason', '')}")
-                elif severity == "STANDARD":
-                    st.warning(f"🟡 Severity: STANDARD")
-                else:
-                    st.success("✅ NAV Healthy")
+                st.success("✅ NAV Healthy")
 
-                st.markdown(result.get("final_summary", ""))
-                st.download_button(
-                    label="📥 Download Report",
-                    data=result.get("final_summary", ""),
-                    file_name=f"{fund_id}_incident_report.md",
-                    mime="text/markdown"
-                )
+            st.markdown(result.get("final_summary", ""))
+            st.download_button(
+                label="📥 Download Report",
+                data=result.get("final_summary", ""),
+                file_name=f"{current_fund}_incident_report.md",
+                mime="text/markdown"
+            )
 
         with tab4:
             st.subheader("💰 Cost Report")
-            result = st.session_state.get("triage_result", {})
-            if not result or not result.get("cost_tracker"):
-                st.info("Run triage first to see cost breakdown.")
+            trackers = result.get("cost_tracker", [])
+            if not trackers:
+                st.info("No cost data available.")
             else:
-                trackers = result["cost_tracker"]
                 total_cost = sum(t["cost_usd"] for t in trackers)
                 total_tokens = sum(t["total_tokens"] for t in trackers)
 
-                # Summary metrics
                 col_a, col_b, col_c, col_d = st.columns(4)
                 with col_a:
                     st.metric("Total Cost", f"${total_cost:.6f}")
@@ -694,7 +701,6 @@ with col2:
 
                 st.divider()
                 st.markdown("**Per Agent Breakdown:**")
-
                 for t in trackers:
                     icon = "💰" if t["model"] == "gpt-4o-mini" else "🧠"
                     with st.expander(f"{icon} {t['agent']} — ${t['cost_usd']:.6f} ({t['model']})"):
@@ -711,7 +717,6 @@ with col2:
                 st.markdown("- 🧠 `gpt-4o` — Fund, Feed, Knowledge, Supervisor (complex reasoning)")
                 st.markdown("- 💰 `gpt-4o-mini` — Consumer, Severity (simple classification, 10x cheaper)")
 
-                # Savings
                 mini_tokens = sum(t["total_tokens"] for t in trackers if t["model"] == "gpt-4o-mini")
                 cost_if_all_powerful = total_cost + (mini_tokens / 1_000_000) * (
                     COSTS["gpt-4o"]["input"] - COSTS["gpt-4o-mini"]["input"]
@@ -728,7 +733,6 @@ with col2:
             if not all_memories:
                 st.info("No incidents in memory yet. Run a triage and submit an SRE decision to populate memory.")
             else:
-                # Summary metrics
                 critical = sum(1 for m in all_memories if m["severity"] == "CRITICAL")
                 approved = sum(1 for m in all_memories if m["sre_decision"] == "APPROVE")
                 avg_time = sum(
@@ -748,11 +752,11 @@ with col2:
 
                 st.divider()
 
-                # Filter by fund
                 funds_in_memory = list(set(m["fund_id"] for m in all_memories))
                 selected_fund = st.selectbox(
                     "Filter by fund:",
-                    ["All"] + funds_in_memory
+                    ["All"] + funds_in_memory,
+                    key="memory_filter"
                 )
 
                 filtered = all_memories if selected_fund == "All" else [
@@ -773,3 +777,5 @@ with col2:
                             st.markdown(f"**Resolution Time:** {m['resolution_time_mins']} min")
                             st.markdown(f"**Resolution:** {m['resolution_taken']}")
                         st.markdown(f"**Key Lesson:** {m['key_lesson']}")
+    else:
+        st.info("Select a fund and click **🚀 Run Triage** to start.")
