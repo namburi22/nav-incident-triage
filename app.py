@@ -163,12 +163,10 @@ class IncidentMemory(Base):
 
 Base.metadata.create_all(engine)
 
-# --- FIXED: Memory functions use session_state as primary store ---
+# --- Memory functions — session_state as primary store ---
 def save_incident_memory(incident: dict):
-    """Save to session state (primary) and SQLite (secondary)."""
     if "memory_store" not in st.session_state:
         st.session_state["memory_store"] = []
-
     record = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "fund_id": incident["fund_id"],
@@ -182,8 +180,6 @@ def save_incident_memory(incident: dict):
         "sre_decision": incident.get("sre_decision"),
     }
     st.session_state["memory_store"].insert(0, record)
-
-    # Also write to SQLite — best effort
     try:
         with Session(engine) as session:
             memory = IncidentMemory(
@@ -204,7 +200,6 @@ def save_incident_memory(incident: dict):
         pass
 
 def get_all_memories() -> List[dict]:
-    """Session state is source of truth — fall back to SQLite."""
     if "memory_store" in st.session_state and st.session_state["memory_store"]:
         return st.session_state["memory_store"]
     try:
@@ -236,10 +231,8 @@ def get_all_memories() -> List[dict]:
         return []
 
 def get_incident_memories(fund_id: str, limit: int = 10) -> List[dict]:
-    """Get memories for a specific fund."""
     all_mem = get_all_memories()
-    fund_mem = [m for m in all_mem if m.get("fund_id") == fund_id]
-    return fund_mem[:limit]
+    return [m for m in all_mem if m.get("fund_id") == fund_id][:limit]
 
 # --- Page config ---
 st.set_page_config(
@@ -279,15 +272,10 @@ async def run_fund_triage_portfolio(fund_id: str, fund_meta: dict) -> dict:
         summary = f"{fund_meta['name']} NAV healthy — no action required"
 
     return {
-        "fund_id": fund_id,
-        "fund_name": fund_meta["name"],
-        "aum_b": fund_meta["aum_b"],
-        "nav_status": nav_status,
-        "nav_value": nav.get("nav", 0),
-        "severity": severity,
-        "feeds_down": feeds_down,
-        "consumers": consumers,
-        "summary": summary,
+        "fund_id": fund_id, "fund_name": fund_meta["name"],
+        "aum_b": fund_meta["aum_b"], "nav_status": nav_status,
+        "nav_value": nav.get("nav", 0), "severity": severity,
+        "feeds_down": feeds_down, "consumers": consumers, "summary": summary,
     }
 
 async def run_category_triage(category: str, category_meta: dict) -> dict:
@@ -295,7 +283,6 @@ async def run_category_triage(category: str, category_meta: dict) -> dict:
         run_fund_triage_portfolio(fund_id, fund_meta)
         for fund_id, fund_meta in category_meta["funds"].items()
     ]))
-
     total    = len(fund_results)
     healthy  = sum(1 for f in fund_results if f["severity"] == "HEALTHY")
     warning  = sum(1 for f in fund_results if f["severity"] == "WARNING")
@@ -303,21 +290,12 @@ async def run_category_triage(category: str, category_meta: dict) -> dict:
     health_score = (healthy / total) * 100
     total_aum    = sum(f["aum_b"] for f in fund_results)
     aum_at_risk  = sum(f["aum_b"] for f in fund_results if f["severity"] != "HEALTHY")
-
     all_feeds_down = []
     for f in fund_results:
         all_feeds_down.extend(f["feeds_down"])
     shared_feeds = list(set([f for f in all_feeds_down if all_feeds_down.count(f) > 1]))
-
-    if critical > 0:
-        risk_level = "CRITICAL"
-    elif warning > 0:
-        risk_level = "WARNING"
-    else:
-        risk_level = "HEALTHY"
-
+    risk_level = "CRITICAL" if critical > 0 else "WARNING" if warning > 0 else "HEALTHY"
     priority_score = (critical * 3 + warning * 1) * (aum_at_risk / max(total_aum, 1)) * 100
-
     if risk_level != "HEALTHY":
         critical_funds = [f["fund_id"] for f in fund_results if f["severity"] == "CRITICAL"]
         warning_funds  = [f["fund_id"] for f in fund_results if f["severity"] == "WARNING"]
@@ -330,21 +308,12 @@ async def run_category_triage(category: str, category_meta: dict) -> dict:
         category_summary = response.content
     else:
         category_summary = f"All {total} {category} funds healthy — no action required"
-
     return {
-        "category": category,
-        "description": category_meta["description"],
-        "total_funds": total,
-        "healthy": healthy,
-        "warning": warning,
-        "critical": critical,
-        "health_score": health_score,
-        "total_aum_b": total_aum,
-        "aum_at_risk_b": aum_at_risk,
-        "priority_score": priority_score,
-        "fund_results": fund_results,
-        "shared_feeds_down": shared_feeds,
-        "category_summary": category_summary,
+        "category": category, "description": category_meta["description"],
+        "total_funds": total, "healthy": healthy, "warning": warning, "critical": critical,
+        "health_score": health_score, "total_aum_b": total_aum, "aum_at_risk_b": aum_at_risk,
+        "priority_score": priority_score, "fund_results": fund_results,
+        "shared_feeds_down": shared_feeds, "category_summary": category_summary,
         "risk_level": risk_level,
     }
 
@@ -354,56 +323,39 @@ async def run_portfolio_scan() -> dict:
         run_category_triage(category, meta)
         for category, meta in FUND_REGISTRY.items()
     ]))
-
-    total_funds  = sum(c["total_funds"]   for c in category_results)
-    healthy      = sum(c["healthy"]       for c in category_results)
-    warning      = sum(c["warning"]       for c in category_results)
-    critical     = sum(c["critical"]      for c in category_results)
-    total_aum    = sum(c["total_aum_b"]   for c in category_results)
-    aum_at_risk  = sum(c["aum_at_risk_b"] for c in category_results)
+    total_funds    = sum(c["total_funds"]   for c in category_results)
+    healthy        = sum(c["healthy"]       for c in category_results)
+    warning        = sum(c["warning"]       for c in category_results)
+    critical       = sum(c["critical"]      for c in category_results)
+    total_aum      = sum(c["total_aum_b"]   for c in category_results)
+    aum_at_risk    = sum(c["aum_at_risk_b"] for c in category_results)
     overall_health = (healthy / total_funds) * 100
-
-    ranked = sorted(category_results, key=lambda x: x["priority_score"], reverse=True)
+    ranked         = sorted(category_results, key=lambda x: x["priority_score"], reverse=True)
     highest_priority = ranked[0]["category"] if ranked[0]["priority_score"] > 0 else "None"
-
-    critical_cats = [c["category"] for c in category_results if c["risk_level"] == "CRITICAL"]
-    warning_cats  = [c["category"] for c in category_results if c["risk_level"] == "WARNING"]
-
+    critical_cats  = [c["category"] for c in category_results if c["risk_level"] == "CRITICAL"]
+    warning_cats   = [c["category"] for c in category_results if c["risk_level"] == "WARNING"]
     response = await llm_powerful.ainvoke(
         f"Portfolio Health: {overall_health:.0f}%. Funds: {total_funds} total, "
         f"{healthy} healthy, {warning} warning, {critical} critical. "
         f"AUM: ${total_aum:.1f}B total, ${aum_at_risk:.1f}B at risk. "
         f"Critical categories: {critical_cats}. Warning: {warning_cats}. "
-        f"Highest priority: {highest_priority}. "
-        f"Executive summary for VP Engineering — 3 sentences max."
+        f"Highest priority: {highest_priority}. Executive summary for VP Engineering — 3 sentences max."
     )
-
     return {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "total_funds": total_funds,
-        "healthy": healthy,
-        "warning": warning,
-        "critical": critical,
-        "overall_health": overall_health,
-        "total_aum_b": total_aum,
-        "aum_at_risk_b": aum_at_risk,
-        "categories": ranked,
-        "highest_priority_category": highest_priority,
-        "portfolio_summary": response.content,
-        "scan_time_secs": round(time.time() - start, 2),
+        "total_funds": total_funds, "healthy": healthy, "warning": warning, "critical": critical,
+        "overall_health": overall_health, "total_aum_b": total_aum, "aum_at_risk_b": aum_at_risk,
+        "categories": ranked, "highest_priority_category": highest_priority,
+        "portfolio_summary": response.content, "scan_time_secs": round(time.time() - start, 2),
     }
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("Configuration")
-    fund_id = st.selectbox(
-        "Select Fund",
-        ["FUND001", "FUND002", "FUND003"],
-        index=0
-    )
+    fund_id = st.selectbox("Select Fund", ["FUND001", "FUND002", "FUND003"], index=0)
     st.divider()
     st.markdown("**System Status**")
-    st.success("Agents: Ready")
+    st.success("Agents: Ready ⚡ Parallel")
     st.success("RAG: Connected")
     st.success("Memory: Connected")
     st.success("LangSmith: Tracing")
@@ -474,8 +426,8 @@ def get_incident_history(fund_id: str) -> list:
     """Get incident history for a fund."""
     return {
         "FUND001": [
-            {"date": "2026-03-10", "issue": "Price feed down",       "resolution": "Feed restarted",   "duration_mins": 45},
-            {"date": "2026-02-22", "issue": "Corporate action missing","resolution": "Manual override", "duration_mins": 120},
+            {"date": "2026-03-10", "issue": "Price feed down",        "resolution": "Feed restarted",   "duration_mins": 45},
+            {"date": "2026-02-22", "issue": "Corporate action missing","resolution": "Manual override",  "duration_mins": 120},
         ],
         "FUND003": [
             {"date": "2026-04-01", "issue": "NAV timeout", "resolution": "Reprocessed", "duration_mins": 30}
@@ -507,6 +459,7 @@ class IncidentState(TypedDict):
     errors: List[str]
     steps: List[dict]
     cost_tracker: List[dict]
+    parallel_time: float
     sre_decision: Optional[str]
     sre_rationale: Optional[str]
 
@@ -529,7 +482,11 @@ async def fund_agent(state, status_container):
     try:
         nav = get_fund_nav.invoke({"fund_id": state["fund_id"]})
         history = get_incident_history.invoke({"fund_id": state["fund_id"]})
-        response = llm_t.invoke(f"You are a Fund NAV specialist.\nFund: {state['fund_id']} | NAV: {nav} | History: {history}\nProvide a 3-bullet fund status report covering health, patterns, and risk.")
+        response = await llm_t.ainvoke(
+            f"You are a Fund NAV specialist.\n"
+            f"Fund: {state['fund_id']} | NAV: {nav} | History: {history}\n"
+            f"Provide a 3-bullet fund status report covering health, patterns, and risk."
+        )
         state["nav_report"] = response.content
         state["steps"].append({"agent": "Fund Agent", "status": "✅ Complete", "data": nav})
     except Exception as e:
@@ -555,7 +512,11 @@ async def feed_agent(state, status_container):
             if status.get("status") == "DOWN":
                 feeds_down.append(feed_id)
         state["feeds_down"] = feeds_down
-        response = llm_t.invoke(f"You are a Data Feed specialist.\nFund: {state['fund_id']} | Feeds: {feed_statuses}\nProvide a 3-bullet feed health report covering failures, severity, and NAV impact.")
+        response = await llm_t.ainvoke(
+            f"You are a Data Feed specialist.\n"
+            f"Fund: {state['fund_id']} | Feeds: {feed_statuses}\n"
+            f"Provide a 3-bullet feed health report covering failures, severity, and NAV impact."
+        )
         state["feed_report"] = response.content
         state["steps"].append({"agent": "Feed Agent", "status": "✅ Complete", "data": feed_statuses})
     except Exception as e:
@@ -580,7 +541,11 @@ async def consumer_agent(state, status_container):
             state["steps"].append({"agent": "Consumer Agent", "status": "⚠️ No data", "data": []})
             state["cost_tracker"].append(tracker.summary())
             return state
-        response = llm_t.invoke(f"You are a Downstream Impact specialist.\nFund: {state['fund_id']} | Consumers: {consumers}\nFlag RegulatoryReporter and SettlementEngine as HIGH RISK. Provide a 3-bullet impact report.")
+        response = await llm_t.ainvoke(
+            f"You are a Downstream Impact specialist.\n"
+            f"Fund: {state['fund_id']} | Consumers: {consumers}\n"
+            f"Flag RegulatoryReporter and SettlementEngine as HIGH RISK. Provide a 3-bullet impact report."
+        )
         state["consumer_report"] = response.content
         state["steps"].append({"agent": "Consumer Agent", "status": "✅ Complete", "data": consumers})
     except Exception as e:
@@ -598,8 +563,15 @@ async def knowledge_agent(state, status_container):
     tracker = TokenTracker("Knowledge Agent", "gpt-4o")
     llm_t = llm_powerful.with_config({"callbacks": [tracker]})
     try:
-        context = query_knowledge_base(f"{state['fund_id']} feed failure NAV incident resolution playbook", k=4)
-        response = llm_t.invoke(f"You are a Knowledge Management specialist.\nIncident: {state['question']} | Fund: {state['fund_id']}\nHistorical Context: {context}\nProvide: similar past incidents, proven resolution steps, avg resolution time, recurring patterns.")
+        context = query_knowledge_base(
+            f"{state['fund_id']} feed failure NAV incident resolution playbook", k=4
+        )
+        response = await llm_t.ainvoke(
+            f"You are a Knowledge Management specialist.\n"
+            f"Incident: {state['question']} | Fund: {state['fund_id']}\n"
+            f"Historical Context: {context}\n"
+            f"Provide: similar past incidents, proven resolution steps, avg resolution time, recurring patterns."
+        )
         state["knowledge_report"] = response.content
         state["steps"].append({"agent": "Knowledge Agent", "status": "✅ Complete", "data": "RAG retrieved"})
     except Exception as e:
@@ -616,7 +588,7 @@ async def severity_agent(state, status_container):
     tracker = TokenTracker("Severity Agent", "gpt-4o-mini")
     llm_t = llm_efficient.with_config({"callbacks": [tracker]})
     try:
-        response = llm_t.invoke(f"""Classify severity as CRITICAL or STANDARD.
+        response = await llm_t.ainvoke(f"""Classify severity as CRITICAL or STANDARD.
 Fund: {state['fund_id']}
 NAV Report: {state['nav_report']}
 Feed Report: {state['feed_report']}
@@ -654,7 +626,7 @@ async def supervisor_agent(state, status_container):
             memory_context = f"\nPast {len(past)} incidents:\n"
             for p in past:
                 memory_context += f"- {p['timestamp']}: {p['nav_status']}, resolved in {p['resolution_time_mins']} min. Lesson: {p['key_lesson']}\n"
-        response = llm_t.invoke(f"""You are an Incident Management Supervisor.
+        response = await llm_t.ainvoke(f"""You are an Incident Management Supervisor.
 Question: {state['question']}
 Fund Report: {state['nav_report']}
 Feed Report: {state['feed_report']}
@@ -671,7 +643,7 @@ Synthesize into final executive summary:
         st.write("✅ **Supervisor** — Done")
     return state
 
-# --- Main fund triage runner ---
+# --- Main fund triage runner — PARALLEL ---
 async def run_triage(fund_id, status_container):
     state = {
         "fund_id": fund_id,
@@ -681,19 +653,53 @@ async def run_triage(fund_id, status_container):
         "severity": "", "severity_reason": "",
         "feeds_down": [], "consumers": [],
         "errors": [], "steps": [], "cost_tracker": [],
+        "parallel_time": 0.0,
         "sre_decision": None, "sre_rationale": None,
     }
+
     nav = get_fund_nav.invoke({"fund_id": fund_id})
     if nav.get("status") == "SUCCESS":
         state["final_summary"] = f"✅ {fund_id} NAV is healthy. No investigation needed."
         state["severity"] = "STANDARD"
         return state
-    state = await fund_agent(state, status_container)
-    state = await feed_agent(state, status_container)
-    state = await consumer_agent(state, status_container)
-    state = await knowledge_agent(state, status_container)
+
+    # ⚡ Run 4 agents in parallel
+    parallel_start = time.time()
+
+    fund_result, feed_result, consumer_result, knowledge_result = await asyncio.gather(
+        fund_agent(state.copy(), status_container),
+        feed_agent(state.copy(), status_container),
+        consumer_agent(state.copy(), status_container),
+        knowledge_agent(state.copy(), status_container),
+    )
+
+    parallel_time = round(time.time() - parallel_start, 2)
+
+    # Merge results into state
+    state["nav_report"]       = fund_result["nav_report"]
+    state["feed_report"]      = feed_result["feed_report"]
+    state["consumer_report"]  = consumer_result["consumer_report"]
+    state["knowledge_report"] = knowledge_result["knowledge_report"]
+    state["feeds_down"]       = feed_result["feeds_down"]
+    state["consumers"]        = consumer_result["consumers"]
+    state["parallel_time"]    = parallel_time
+    state["steps"] = (
+        fund_result["steps"] +
+        feed_result["steps"] +
+        consumer_result["steps"] +
+        knowledge_result["steps"]
+    )
+    state["cost_tracker"] = (
+        fund_result["cost_tracker"] +
+        feed_result["cost_tracker"] +
+        consumer_result["cost_tracker"] +
+        knowledge_result["cost_tracker"]
+    )
+
+    # Severity and Supervisor run after — need merged state
     state = await severity_agent(state, status_container)
     state = await supervisor_agent(state, status_container)
+
     return state
 
 # ═══════════════════════════════════════════════════════════════
@@ -715,7 +721,6 @@ with col1:
 
 with col2:
 
-    # --- Trigger: Run Fund Triage ---
     if run_button:
         for key in ["sre_decision", "sre_rationale"]:
             if key in st.session_state:
@@ -727,7 +732,6 @@ with col2:
         st.session_state["triage_fund"]   = fund_id
         st.session_state["active_view"]   = "fund"
 
-    # --- Trigger: Scan Portfolio ---
     if portfolio_button:
         with st.spinner("🗂️ Scanning all fund categories in parallel..."):
             portfolio_result = asyncio.run(run_portfolio_scan())
@@ -739,7 +743,6 @@ with col2:
     # ══════════════════════════════════════════════════════════
     if st.session_state.get("active_view") == "portfolio" and "portfolio_result" in st.session_state:
         pr = st.session_state["portfolio_result"]
-
         st.subheader("🗂️ Portfolio Health Dashboard")
         st.caption(f"Scanned at {pr['timestamp']} — completed in {pr['scan_time_secs']}s")
 
@@ -755,12 +758,9 @@ with col2:
         cols = st.columns(len(pr["categories"]))
         for i, cat in enumerate(pr["categories"]):
             with cols[i]:
-                if cat["risk_level"] == "CRITICAL":
-                    st.error(f"🔴 {cat['category']}")
-                elif cat["risk_level"] == "WARNING":
-                    st.warning(f"🟡 {cat['category']}")
-                else:
-                    st.success(f"🟢 {cat['category']}")
+                if cat["risk_level"] == "CRITICAL":   st.error(f"🔴 {cat['category']}")
+                elif cat["risk_level"] == "WARNING":  st.warning(f"🟡 {cat['category']}")
+                else:                                  st.success(f"🟢 {cat['category']}")
                 st.metric("Health",  f"{cat['health_score']:.0f}%")
                 st.metric("AUM",     f"${cat['total_aum_b']:.1f}B")
                 st.metric("At Risk", f"${cat['aum_at_risk_b']:.1f}B")
@@ -781,7 +781,6 @@ with col2:
                 st.markdown(f"**Summary:** {cat['category_summary']}")
                 if cat["shared_feeds_down"]:
                     st.warning(f"⚠️ Shared feed issue: **{', '.join(cat['shared_feeds_down'])}** affecting multiple funds")
-
                 for f in cat["fund_results"]:
                     fund_icon = "🔴" if f["severity"] == "CRITICAL" else "🟡" if f["severity"] == "WARNING" else "🟢"
                     fc1, fc2, fc3, fc4 = st.columns([1, 2, 1, 3])
@@ -790,14 +789,11 @@ with col2:
                     with fc3: st.write(f"${f['aum_b']}B | {f['nav_status']}")
                     with fc4: st.write(f"⬇️ {', '.join(f['feeds_down'])}" if f["feeds_down"] else "Feeds OK")
 
-                # Category SRE decision
                 if cat["risk_level"] == "CRITICAL":
                     st.divider()
                     st.markdown(f"### SRE Decision — {cat['category']} Category")
                     cat_key = cat["category"].replace(" ", "_")
                     cat_dec_key = f"cat_decision_{cat_key}"
-
-                    # Show outcome if already decided
                     if cat_dec_key in st.session_state:
                         dec = st.session_state[cat_dec_key]
                         if dec == "APPROVE":
@@ -848,24 +844,21 @@ with col2:
         current_fund = st.session_state.get("triage_fund", fund_id)
         st.caption(f"Showing results for: **{current_fund}**")
 
-        # ── SRE APPROVAL — above tabs, stays visible ──
+        # ── SRE APPROVAL above tabs ──
         if result.get("severity") == "CRITICAL":
             with st.expander("🚨 SRE APPROVAL REQUIRED — Click to Review & Decide", expanded=True):
                 col_a, col_b, col_c = st.columns(3)
                 with col_a: st.metric("Fund", result.get("fund_id"))
                 with col_b: st.metric("Severity", "🔴 CRITICAL")
                 with col_c: st.metric("Feeds Down", len(result.get("feeds_down", [])))
-
                 st.markdown(f"**Reason:** {result.get('severity_reason', 'N/A')}")
                 st.markdown(f"**Feeds Down:** {', '.join(result.get('feeds_down', [])) or 'None'}")
                 st.markdown(f"**Impacted Systems:** {', '.join(result.get('consumers', [])) or 'None'}")
                 st.markdown(f"**Historical avg resolution:** ~82 minutes")
-
                 st.divider()
 
-                # Show outcome if decision already made
                 if "sre_decision" in st.session_state:
-                    sre_decision = st.session_state["sre_decision"]
+                    sre_decision  = st.session_state["sre_decision"]
                     sre_rationale = st.session_state["sre_rationale"]
                     if sre_decision == "APPROVE":
                         st.error("🚨 P1 ESCALATED")
@@ -876,8 +869,6 @@ with col2:
                         st.markdown(f"**Decision:** REJECTED | **Rationale:** {sre_rationale}")
                         st.markdown("- Check feed status every 15 minutes\n- Escalate to P1 if not resolved in 60 minutes\n- Keep stakeholders informed via email")
                     st.success("✅ Decision logged to memory database")
-
-                # Show form only if no decision yet
                 else:
                     decision = st.radio(
                         "Approve P1 escalation?",
@@ -921,6 +912,11 @@ with col2:
 
         with tab1:
             st.subheader("Investigation Results")
+
+            # ⚡ Parallel timing badge
+            if result.get("parallel_time"):
+                st.info(f"⚡ 4 agents ran in parallel — completed in {result['parallel_time']}s")
+
             if result["steps"]:
                 for step in result["steps"]:
                     with st.expander(f"{step['agent']} — {step['status']}"):
@@ -965,9 +961,9 @@ with col2:
                 total_cost   = sum(t["cost_usd"]    for t in trackers)
                 total_tokens = sum(t["total_tokens"] for t in trackers)
                 col_a, col_b, col_c, col_d = st.columns(4)
-                with col_a: st.metric("Total Cost",      f"${total_cost:.6f}")
-                with col_b: st.metric("Total Tokens",    f"{total_tokens:,}")
-                with col_c: st.metric("Cost per 1K runs",f"${total_cost * 1000:.2f}")
+                with col_a: st.metric("Total Cost",       f"${total_cost:.6f}")
+                with col_b: st.metric("Total Tokens",     f"{total_tokens:,}")
+                with col_c: st.metric("Cost per 1K runs", f"${total_cost * 1000:.2f}")
                 with col_d:
                     mini = sum(1 for t in trackers if t["model"] == "gpt-4o-mini")
                     st.metric("Cheap model used", f"{mini}/{len(trackers)} agents")
@@ -1005,7 +1001,9 @@ with col2:
                 with c4: st.metric("Avg Resolution",  f"{avg_time:.0f} min")
                 st.divider()
                 funds_in_memory = list(set(m["fund_id"] for m in all_memories))
-                selected_fund = st.selectbox("Filter by fund:", ["All"] + funds_in_memory, key="memory_filter")
+                selected_fund = st.selectbox(
+                    "Filter by fund:", ["All"] + funds_in_memory, key="memory_filter"
+                )
                 filtered = all_memories if selected_fund == "All" else [
                     m for m in all_memories if m["fund_id"] == selected_fund
                 ]
